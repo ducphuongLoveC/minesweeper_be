@@ -90,6 +90,18 @@ app.use(express.static('public', {
     maxAge: '1d' // Cache tài nguyên tĩnh trong 1 ngày
 }));
 
+
+io.on('connection', (socket) => {
+    console.log('User connected to default namespace:', socket.id);
+    socket.on('ping', (data) => {
+        socket.emit('pong', { pingTime: data.pingTime });
+    });
+
+    socket.on('disconnect', () => {
+        console.log('User disconnected from default namespace:', socket.id);
+    });
+});
+
 const singleNamespace = io.of('/single');
 singleNamespace.on('connection', (socket) => {
     console.log('User connected to /single namespace:', socket.id);
