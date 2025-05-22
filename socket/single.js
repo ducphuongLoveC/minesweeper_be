@@ -1,128 +1,177 @@
+const uWS = require('uWebSockets.js');
 const Minesweeper = require('../core/Minesweeper.js');
 
-function single(io, socket) {
-    const dataPlayer = {
-        gameState: null,
-        playerState: {
-            revealedCells: new Set(),
-            flags: new Set()
+
+
+function single(app) {
+    const players = new Map();
+ 
+    app.ws('/single', {
+        open: (ws) => {
+            console.log('User connected to /single:', ws.id);
+            ws.id = generateId(); // Tạo ID duy nhất cho client
+            players.set(ws.id, {
+                gameState: null,
+                playerState: {
+                    revealedCells: new Set(),
+                    flags: new Set()
+                },
+                saveConfig: {}
+            });
+            ws.subscribe('single'); // Đăng ký client vào channel "single"
         },
-        saveConfig: {}
+        message: (ws, message, isBinary) => {
+            const data = JSON.parse(Buffer.from(message).toString());
+            const playerData = players.get(ws.id);
+            if (!playerData) return;
+
+            switch (data.event) {
+                case 'initializeGame':
+                    handleInitializeGame(ws, playerData, data.configMode);
+                    break;
+                case 'chording':
+                    handleChording(ws, playerData, data.index);
+                    break;
+                case 'openCell':
+                    handleOpenCell(ws, playerData, data.index);
+                    break;
+                case 'toggleFlag':
+                    handleToggleFlag(ws, playerData, data.index);
+                    break;
+            }
+        },
+        close: (ws) => {
+            console.log('User disconnected from /single:', ws.id);
+            players.delete(ws.id); // Xóa trạng thái khi client ngắt kết nối
+        }
+    });
+}
+
+// Hàm tạo ID duy nhất cho client
+function generateId() {
+    return Math.random().toString(36).substr(2, 9);
+}
+
+// Hàm trả về dữ liệu trạng thái để gửi
+function getDataToSend(playerData) {
+    return {
+        gameState: playerData.gameState.getState(),
+        playerState: {
+            revealedCells: Array.from(playerData.playerState.revealedCells),
+            flags: Array.from(playerData.playerState.flags)
+        }
+    };
+}
+
+// Xử lý sự kiện initializeGame
+function handleInitializeGame(ws, playerData, configMode) {
+    playerData.saveConfig = configMode;
+    const { rows, cols, mines } = playerData.saveConfig;
+    playerData.gameState = new Minesweeper(rows || 9, cols || 9, mines || null);
+    playerData.gameState.start();
+    playerData.playerState = {
+        revealedCells: new Set(),
+        flags: new Set()
     };
 
-    function getDataToSend() {
-        return {
-            gameState: dataPlayer.gameState.getState(),
-            playerState: {
-                revealedCells: Array.from(dataPlayer.playerState.revealedCells),
-                flags: Array.from(dataPlayer.playerState.flags)
-            }
-        };
+    ws.send(JSON.stringify({
+        event: 'setGames',
+        data: getDataToSend(playerData)
+    }));
+}
+
+// Xử lý sự kiện chording
+function handleChording(ws, playerData, index) {
+    const { gameState, playerState } = playerData;
+    const flags = Array.from(playerState.flags);
+    const result = gameState.chording(index, flags);
+
+    if (result.success) {
+        result.openedIndices.forEach(i => playerState.revealedCells.add(i));
     }
 
-    socket.on('initializeGame', (configMode) => {
+    const updateData = {
+        ...getDataToSend(playerData),
+        action: { type: 'chord', index, result }
+    };
 
-        dataPlayer.saveConfig = configMode;
-        const { rows, cols, mines } = dataPlayer.saveConfig;
-        dataPlayer.gameState = new Minesweeper(rows || 9, cols || 9, mines || null);
-        dataPlayer.gameState.start();
-        dataPlayer.playerState = {
-            revealedCells: new Set(),
-            flags: new Set()
-        };
+    if (result.isMine) {
+        const { mines } = gameState.getState();
+        mines?.forEach(i => playerState.revealedCells.add(i));
+        ws.send(JSON.stringify({
+            event: 'gameOver',
+            data: { message: 'Bạn đã chạm vào bom' }
+        }));
+    } else if (result.isWin) {
+        ws.send(JSON.stringify({
+            event: 'gameOver',
+            data: { message: 'Bạn đã thắng' }
+        }));
+    }
 
-        socket.emit('setGames', getDataToSend());
-    });
+    ws.send(JSON.stringify({
+        event: 'updateState',
+        data: updateData
+    }));
+}
 
-    socket.on('chording', ({ index }) => {
-        const { gameState, playerState } = dataPlayer;
+// Xử lý sự kiện openCell
+function handleOpenCell(ws, playerData, index) {
+    if (index == null || !playerData.gameState) return;
+    if (playerData.playerState.flags.has(index)) return;
 
-        const flags = Array.from(playerState.flags);
+    const { gameState, playerState } = playerData;
+    const result = gameState.openCell(index);
 
-        const result = gameState.chording(index, flags);
-        if (result.success) {
+    if (result) {
+        playerState.revealedCells.add(index);
+        if (result.openedIndices?.length > 0) {
             result.openedIndices.forEach(i => playerState.revealedCells.add(i));
         }
 
+        const updateData = {
+            ...getDataToSend(playerData),
+            action: { type: 'open', index, result }
+        };
+
         if (result.isMine) {
-
-            const { mines } = gameState.getState();
-            mines?.forEach(i => playerState.revealedCells.add(i));
-
-            socket.emit('gameOver', {
-                message: 'Bạn đã chạm vào bom'
-            });
+            result.mines.forEach(i => playerState.revealedCells.add(i));
+            ws.send(JSON.stringify({
+                event: 'gameOver',
+                data: { message: 'Bạn đã thua!' }
+            }));
         } else if (result.isWin) {
-            socket.emit('gameOver', {
-                message: 'Bạn đã thắng'
-            });
+            ws.send(JSON.stringify({
+                event: 'gameOver',
+                data: { message: 'Bạn đã thắng game!' }
+            }));
         }
 
-        socket.emit('updateState', {
-            ...getDataToSend(),
-            action: { type: 'chord', index, result }
-        });
-    })
+        ws.send(JSON.stringify({
+            event: 'updateState',
+            data: updateData
+        }));
+    }
+}
 
+function handleToggleFlag(ws, playerData, index) {
+    if (index == null || !playerData.gameState) return;
+    if (playerData.playerState.revealedCells.has(index)) return;
 
-    socket.on('openCell', ({ index }) => {
-        if (index === undefined || index === null) return;
-        if (!dataPlayer.gameState) return;
+    const { playerState } = playerData;
+    if (playerState.flags.has(index)) {
+        playerState.flags.delete(index);
+    } else {
+        playerState.flags.add(index);
+    }
 
-        const currentGamePlayer = dataPlayer.gameState;
-        const playerState = dataPlayer.playerState;
-
-        if (playerState.flags.has(index)) return;
-
-        const result = currentGamePlayer.openCell(index);
-
-        if (result) {
-            playerState.revealedCells.add(index);
-
-            if (result.openedIndices?.length > 0) {
-                result.openedIndices.forEach(i => playerState.revealedCells.add(i));
-            }
-
-            if (result.isMine) {
-                const { mines } = result;
-
-                mines.forEach((i) => playerState.revealedCells.add(i))
-
-                socket.emit('gameOver', {
-                    message: 'Bạn đã thua!'
-                });
-            } else if (result.isWin) {
-                socket.emit('gameOver', {
-                    message: 'Bạn đã thắng game!'
-                });
-            }
-
-            socket.emit('updateState', {
-                ...getDataToSend(),
-                action: { type: 'open', index, result }
-            });
-        }
-    });
-
-    socket.on('toggleFlag', ({ index }) => {
-        if (index === undefined || index === null) return;
-        if (!dataPlayer.gameState) return;
-
-        const playerState = dataPlayer.playerState;
-
-        if (playerState.revealedCells.has(index)) return;
-
-        if (playerState.flags.has(index)) {
-            playerState.flags.delete(index);
-        } else {
-            playerState.flags.add(index);
-        }
-
-        socket.emit('updateState', {
-            ...getDataToSend(),
+    ws.send(JSON.stringify({
+        event: 'updateState',
+        data: {
+            ...getDataToSend(playerData),
             action: { type: 'flag', index }
-        });
-    });
+        }
+    }));
 }
 
 module.exports = single;
