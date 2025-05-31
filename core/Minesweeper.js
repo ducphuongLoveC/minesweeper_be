@@ -3,7 +3,7 @@ class Minesweeper {
         this.ratioX = ratioX;
         this.ratioY = ratioY;
         this.mineCounter = mineCounter;
-        this.isMines = [];
+        this.mineIndices = [];
         this.openedCells = 0;
         this.gameOver = false;
         this.cells = Array(ratioX * ratioY).fill(0).map(() => ({
@@ -19,7 +19,7 @@ class Minesweeper {
 
     totalMines() {
         const totalCells = this.getTotalCells();
-        let mineRatio = totalCells < 100 ? 0.12 : totalCells <= 300 ? 0.15 : 0.20;
+        let mineRatio = totalCells < 100 ? 0.13 : totalCells <= 300 ? 0.16 : 0.21;
         let mineCount = Math.floor(totalCells * mineRatio);
         mineCount = Math.max(1, mineCount);
         mineCount = Math.min(mineCount, Math.floor(totalCells * 0.25));
@@ -46,20 +46,29 @@ class Minesweeper {
     }
 
     setupMines() {
-        const totalMines = this.mineCounter || this.totalMines();
+        let totalMines = 1;
+        if (this.mineCounter) {
+            if (this.mineCounter > this.getTotalCells()) {
+                totalMines = this.getTotalCells();
+            } else {
+                totalMines = this.mineCounter;
+            }
+        } else {
+            totalMines = this.totalMines();
+        }
         const mapForMark = Array(this.getTotalCells()).fill(0).map((_, index) => index);
 
         for (let i = 0; i < totalMines; i++) {
             const randomIndex = Math.floor(Math.random() * mapForMark.length);
             const mineIndex = mapForMark[randomIndex];
-            this.isMines.push(mineIndex);
+            this.mineIndices.push(mineIndex);
             this.cells[mineIndex].isMine = true;
             mapForMark.splice(randomIndex, 1);
         }
     }
 
     markMines() {
-        this.isMines.forEach((mineIndex) => {
+        this.mineIndices.forEach((mineIndex) => {
             const aroundIndices = this.getIndexAround(mineIndex);
             aroundIndices.forEach((index) => {
                 if (!this.cells[index].isMine) {
@@ -129,7 +138,7 @@ class Minesweeper {
 
         if (this.cells[index].isMine) {
             this.gameOver = true;
-            return { success: false, isMine: true, mines: this.isMines };
+            return { success: false, isMine: true, mines: this.mineIndices };
         }
 
         const result = {
@@ -150,7 +159,7 @@ class Minesweeper {
             });
         }
 
-        if (this.openedCells === this.getTotalCells() - this.isMines.length) {
+        if (this.openedCells === this.getTotalCells() - this.mineIndices.length) {
             this.gameOver = true;
             result.isWin = true;
         }
@@ -171,8 +180,8 @@ class Minesweeper {
             cells: this.cells,
             gameOver: this.gameOver,
             openedCells: this.openedCells,
-            totalMines: this.totalMines(),
-            mines: this.isMines
+            totalMines: this.mineCounter || this.totalMines(),
+            mines: this.mineIndices
         };
     }
 }

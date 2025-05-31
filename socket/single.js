@@ -7,31 +7,44 @@ function single(io, socket) {
             revealedCells: new Set(),
             flags: new Set()
         },
-        saveConfig: {}
+        saveConfig: {},
+        stat: {
+
+        }
     };
 
-    function getDataToSend() {
-        return {
-            gameState: dataPlayer.gameState.getState(),
+    function getDataToSend(sendGS) {
+
+        const data = {
             playerState: {
                 revealedCells: Array.from(dataPlayer.playerState.revealedCells),
                 flags: Array.from(dataPlayer.playerState.flags)
             }
         };
+        if (sendGS) {
+            data.gameState = dataPlayer.gameState.getState()
+        }
+        return data
     }
 
     socket.on('initializeGame', (configMode) => {
 
         dataPlayer.saveConfig = configMode;
+
+        console.log(dataPlayer.saveConfig);
+
         const { rows, cols, mines } = dataPlayer.saveConfig;
         dataPlayer.gameState = new Minesweeper(rows || 9, cols || 9, mines || null);
         dataPlayer.gameState.start();
+
+        console.log(dataPlayer.gameState.getState());
+
         dataPlayer.playerState = {
             revealedCells: new Set(),
             flags: new Set()
         };
 
-        socket.emit('setGames', getDataToSend());
+        socket.emit('setGames', getDataToSend(true));
     });
 
     socket.on('chording', ({ index }) => {
