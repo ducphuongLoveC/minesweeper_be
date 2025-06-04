@@ -140,8 +140,6 @@
 
 // module.exports = single;
 
-
-
 const Minesweeper = require('../core/Minesweeper.js');
 
 function single(io, socket) {
@@ -152,7 +150,8 @@ function single(io, socket) {
             flags: new Set()
         },
         saveConfig: {},
-        stat: {}
+        stat: {},
+        status: null
     };
 
     socket.on('initializeGame', (configMode) => {
@@ -161,6 +160,7 @@ function single(io, socket) {
         dataPlayer.gameState = new Minesweeper(rows || 9, cols || 9, mines || null);
         dataPlayer.gameState.start();
 
+        dataPlayer.status = 'playing'
         dataPlayer.playerState = {
             revealedCells: new Set(),
             flags: new Set()
@@ -169,7 +169,8 @@ function single(io, socket) {
         socket.emit('gameInitialized', {
             gameState: dataPlayer.gameState.getState(),
             revealedCells: Array.from(dataPlayer.playerState.revealedCells),
-            flags: Array.from(dataPlayer.playerState.flags)
+            flags: Array.from(dataPlayer.playerState.flags),
+            status: dataPlayer.status
         });
     });
 
@@ -177,7 +178,7 @@ function single(io, socket) {
         const { gameState, playerState } = dataPlayer;
         const flags = Array.from(playerState.flags);
         const result = gameState.chording(index, flags);
-        
+
         if (result.success) {
             result.openedIndices.forEach(i => playerState.revealedCells.add(i));
         }
@@ -190,16 +191,21 @@ function single(io, socket) {
         if (result.isMine) {
             const { mines } = gameState.getState();
             mines?.forEach(i => playerState.revealedCells.add(i));
+            console.log('check');
+
             socket.emit('gameOver', {
                 message: 'Bạn đã chạm vào bom',
                 revealedCells: Array.from(playerState.revealedCells),
-                flags: Array.from(playerState.flags)
+                flags: Array.from(playerState.flags),
+                status: 'lost'
             });
         } else if (result.isWin) {
             socket.emit('gameOver', {
                 message: 'Bạn đã thắng',
                 revealedCells: Array.from(playerState.revealedCells),
-                flags: Array.from(playerState.flags)
+                flags: Array.from(playerState.flags),
+                status: 'winner'
+
             });
         } else {
             socket.emit('stateUpdate', {
@@ -236,20 +242,23 @@ function single(io, socket) {
                 socket.emit('gameOver', {
                     message: 'Bạn đã thua!',
                     revealedCells: Array.from(playerState.revealedCells),
-                    flags: Array.from(playerState.flags)
+                    flags: Array.from(playerState.flags),
+                    status: 'lost'
                 });
             } else if (result.isWin) {
                 socket.emit('gameOver', {
                     message: 'Bạn đã thắng game!',
                     revealedCells: Array.from(playerState.revealedCells),
-                    flags: Array.from(playerState.flags)
+                    flags: Array.from(playerState.flags),
+                    status: 'lost'
                 });
             } else {
                 socket.emit('stateUpdate', {
                     action: 'open',
                     index,
                     result,
-                    changes
+                    changes,
+
                 });
             }
         }
